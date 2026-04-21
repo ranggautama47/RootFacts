@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+build/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# windows
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+
+# vite
+.vite/
+
+# pwa
+dev-dist/
+
+# cache
+.cache/

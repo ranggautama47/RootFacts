@@ -33,7 +33,11 @@
 }
 
 body {
-  font-family: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Poppins",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   background-color: var(--bg-body);
   color: var(--text-primary);
   line-height: 1.6;
@@ -58,7 +62,8 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -509,6 +514,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-color: var(--primary);
 }
 
+.copy-btn span {
+  transition: all 0.3s ease;
+}
+
 .fun-fact-loading {
   display: flex;
   align-items: center;
@@ -581,7 +590,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
-
 
 /* offline banner */
 .offline-banner {

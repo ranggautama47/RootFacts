@@ -6,6 +6,7 @@ import {
   Copy,
   Share2,
 } from "lucide-react";
+import Swal from "sweetalert2";
 
 function InfoPanel({
   appState,
@@ -105,6 +106,35 @@ function InfoPanel({
           ? "✗ Gagal"
           : null;
 
+    const handleShare = async () => {
+      const text = funFactData?.text || "";
+      const shareText = `Fakta menarik:\n${text}`;
+
+      // ✅ Kalau browser support native share (HP)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: "RootFacts",
+            text: shareText,
+          });
+        } catch (err) {
+          console.log("Share dibatalkan");
+        }
+      } else {
+        // ❌ fallback (desktop)
+        Swal.fire({
+          title: "Bagikan ke",
+          html: `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <a href="https://wa.me/?text=${encodeURIComponent(shareText)}" target="_blank">📱 WhatsApp</a>
+          <a href="https://t.me/share/url?text=${encodeURIComponent(shareText)}" target="_blank">✈️ Telegram</a>
+        </div>
+      `,
+          showConfirmButton: false,
+        });
+      }
+    };
+
     return (
       <div id="state-result" className="result-card result-main">
         <div className="detected-badge">
@@ -152,7 +182,11 @@ function InfoPanel({
           </span>
         </div>
 
-        <div className="share-hint">
+        <div
+          className="share-hint"
+          onClick={handleShare}
+          style={{ cursor: "pointer" }}
+        >
           <Share2 size={14} />
           <span>Salin dan bagikan ke teman!</span>
         </div>

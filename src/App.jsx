@@ -7,6 +7,7 @@ import { useAppState } from "./hooks/useAppState";
 import { CameraService } from "./services/CameraService";
 import { DetectionService } from "./services/DetectionService";
 import { RootFactsService, TONE_CONFIG } from "./services/RootFactsService";
+import Swal from "sweetalert2";
 
 const MODEL_URL = "/model/model.json";
 const METADATA_URL = "/model/metadata.json";
@@ -58,6 +59,17 @@ function App() {
     const initServices = async () => {
       try {
         actions.setAppState("initializing");
+
+        // 🔥 LOADING POPUP
+        Swal.fire({
+          title: "Menyiapkan AI...",
+          html: "Memulai unduhan model...",
+          allowOutsideClick: false,
+          didOpen: () => {
+            Swal.showLoading();
+          },
+        });
+
         actions.setModelStatus({ cv: "loading", ai: "loading" });
 
         actions.setServices({
@@ -66,7 +78,7 @@ function App() {
           facts: factsServiceRef.current,
         });
 
-        // Muat model CV (TensorFlow.js) dengan progress
+        // 🔥 LOAD MODEL CV
         await detectionServiceRef.current.loadModel(
           MODEL_URL,
           METADATA_URL,
@@ -77,15 +89,28 @@ function App() {
               cvProgress: percent,
               cvMessage: message,
             }));
+
+            // ✅ UPDATE POPUP
+            Swal.update({
+              html: `
+              <div style="text-align:left">
+                <p><b>${message}</b></p>
+                <div style="background:#eee;border-radius:6px;overflow:hidden">
+                  <div style="
+                    width:${percent}%;
+                    background:#10b981;
+                    height:8px;
+                    transition:0.3s;
+                  "></div>
+                </div>
+                <p style="font-size:12px;margin-top:6px">${percent}%</p>
+              </div>
+            `,
+            });
           },
         );
-        actions.setModelStatus((prev) => ({
-          ...prev,
-          cv: "ready",
-          cvProgress: 100,
-        }));
 
-        // Muat model AI (Transformers.js) dengan progress
+        // 🔥 LOAD MODEL AI
         await factsServiceRef.current.loadModel((percent, message) => {
           actions.setModelStatus((prev) => ({
             ...prev,
@@ -93,17 +118,50 @@ function App() {
             aiProgress: percent,
             aiMessage: message,
           }));
+
+          // ✅ UPDATE POPUP
+          Swal.update({
+            html: `
+            <div style="text-align:left">
+              <p><b>${message}</b></p>
+              <div style="background:#eee;border-radius:6px;overflow:hidden">
+                <div style="
+                  width:${percent}%;
+                  background:#10b981;
+                  height:8px;
+                  transition:0.3s;
+                "></div>
+              </div>
+              <p style="font-size:12px;margin-top:6px">${percent}%</p>
+            </div>
+          `,
+          });
         });
-        actions.setModelStatus((prev) => ({
-          ...prev,
-          ai: "ready",
-          aiProgress: 100,
-        }));
+
+        // ✅ TUTUP LOADING
+        Swal.close();
+
+        // ✅ SUCCESS POPUP
+        Swal.fire({
+          icon: "success",
+          title: "Siap Digunakan!",
+          text: "Model AI berhasil dimuat 🚀",
+          timer: 1500,
+          showConfirmButton: false,
+        });
 
         actions.setAppState("ready");
         console.log("[App] Semua model berhasil dimuat!");
       } catch (error) {
         console.error("[App] Error inisialisasi:", error);
+
+        // ❌ ERROR POPUP
+        Swal.fire({
+          icon: "error",
+          title: "Gagal Memuat Model",
+          text: error.message,
+        });
+
         actions.setError(`Gagal memuat model: ${error.message}`);
         actions.setAppState("error");
       }
@@ -243,11 +301,37 @@ function App() {
 
     try {
       await navigator.clipboard.writeText(text);
+
+      // 🔥 Toast sukses (UX modern, non-blocking)
+      Swal.fire({
+        toast: true,
+        position: "top-end",
+        icon: "success",
+        title: "Fakta berhasil disalin",
+        showConfirmButton: false,
+        timer: 1500,
+      });
+
+      // Tetap pakai state lama (UNTUK UI BUTTON)
       actions.setCopyStatus("copied");
+
+      // Reset ke idle setelah 2 detik
       setTimeout(() => actions.setCopyStatus("idle"), 2000);
     } catch (error) {
       console.error("[App] Gagal menyalin:", error);
+
+      // 🔥 Toast error
+      Swal.fire({
+        toast: true,
+        position: "top-end",
+        icon: "error",
+        title: "Gagal menyalin",
+        showConfirmButton: false,
+        timer: 1500,
+      });
+
       actions.setCopyStatus("error");
+
       setTimeout(() => actions.setCopyStatus("idle"), 2000);
     }
   }, [state.funFactData, actions]);
@@ -271,11 +355,11 @@ function App() {
     <div className="app-container">
       <Header modelStatus={modelStatusString} />
 
-       {!isOnline && (
-      <div className="offline-banner">
-        ⚠️ Anda sedang offline / koneksi terputus
-      </div>
-    )}
+      {!isOnline && (
+        <div className="offline-banner">
+          ⚠️ Anda sedang offline / koneksi terputus
+        </div>
+      )}
 
       <main className="main-content">
         <CameraSection

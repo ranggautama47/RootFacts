@@ -14,7 +14,6 @@ const METADATA_URL = "/model/metadata.json";
 const CONFIDENCE_THRESHOLD = 70;
 const FACT_COOLDOWN_MS = 8000;
 
-// Buat toneOptions sebagai array agar kompatibel dengan CameraSection
 const TONE_OPTIONS = Object.entries(TONE_CONFIG.tones).map(
   ([value, config]) => ({
     value,
@@ -22,14 +21,40 @@ const TONE_OPTIONS = Object.entries(TONE_CONFIG.tones).map(
   }),
 );
 
+// ── Helper: render HTML progress untuk SweetAlert ────────────────────────────
+function buildProgressHTML(title, message, percent) {
+  const safePercent = Math.min(100, Math.max(0, percent));
+  return `
+        <div style="text-align:left;padding:4px 0">
+            <p style="margin:0 0 6px;font-weight:600;font-size:14px">${title}</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#555">${message}</p>
+            <div style="background:#e5e7eb;border-radius:8px;overflow:hidden;height:10px">
+                <div style="
+                    width:${safePercent}%;
+                    background:linear-gradient(90deg,#10b981,#059669);
+                    height:10px;
+                    transition:width 0.3s ease;
+                    border-radius:8px;
+                "></div>
+            </div>
+            <p style="margin:6px 0 0;font-size:12px;color:#6b7280;text-align:right">${safePercent}%</p>
+        </div>
+    `;
+}
+
 function App() {
   const { state, actions } = useAppState();
   const isOnline = useOnlineStatus();
+
+  // ── Refs ─────────────────────────────────────────────────────────────────
   const detectionCleanupRef = useRef(null);
   const isRunningRef = useRef(false);
   const lastFactTimeRef = useRef(0);
   const lastLabelRef = useRef("");
   const animFrameRef = useRef(null);
+  // [FIX #2] Ref untuk mengunci label saat sedang generate fakta
+  const lockedLabelRef = useRef("");
+  const isGeneratingRef = useRef(false);
 
   const [currentTone, setCurrentTone] = useState(TONE_CONFIG.defaultTone);
 
@@ -37,7 +62,6 @@ function App() {
   const detectionServiceRef = useRef(new DetectionService());
   const factsServiceRef = useRef(new RootFactsService());
 
-  // Internal cleanup — didefinisikan lebih awal agar bisa dipakai di useEffect
   const cleanup = useCallback(() => {
     isRunningRef.current = false;
     if (animFrameRef.current) {
@@ -54,31 +78,32 @@ function App() {
     }
   }, []);
 
-  // [Basic] Inisialisasi semua layanan saat aplikasi dimuat
+  // ── [Basic] Inisialisasi layanan ─────────────────────────────────────────
   useEffect(() => {
     const initServices = async () => {
       try {
         actions.setAppState("initializing");
-
-        // 🔥 LOADING POPUP
-        Swal.fire({
-          title: "Menyiapkan AI...",
-          html: "Memulai unduhan model...",
-          allowOutsideClick: false,
-          didOpen: () => {
-            Swal.showLoading();
-          },
-        });
-
         actions.setModelStatus({ cv: "loading", ai: "loading" });
-
         actions.setServices({
           camera: cameraServiceRef.current,
           detection: detectionServiceRef.current,
           facts: factsServiceRef.current,
         });
 
-        // 🔥 LOAD MODEL CV
+        // ── Buka SweetAlert loading sekali ──────────────────────────
+        Swal.fire({
+          title: "🌿 Memuat RootFacts...",
+          html: buildProgressHTML("Model CV", "Memulai...", 0),
+          allowOutsideClick: false,
+          allowEscapeKey: false,
+          showConfirmButton: false,
+          didOpen: () => Swal.showLoading(),
+        });
+
+        // ── [FIX #1] Muat model CV dengan progress real-time ────────
+        // Root cause stuck 10%: progress callback dari tf.loadLayersModel
+        // hanya dipanggil saat file .bin selesai diunduh, bukan per-byte.
+        // Solusi: tampilkan animasi indeterminate + persentase dari callback.
         await detectionServiceRef.current.loadModel(
           MODEL_URL,
           METADATA_URL,
@@ -89,28 +114,23 @@ function App() {
               cvProgress: percent,
               cvMessage: message,
             }));
-
-            // ✅ UPDATE POPUP
+            // Update SweetAlert real-time
             Swal.update({
-              html: `
-              <div style="text-align:left">
-                <p><b>${message}</b></p>
-                <div style="background:#eee;border-radius:6px;overflow:hidden">
-                  <div style="
-                    width:${percent}%;
-                    background:#10b981;
-                    height:8px;
-                    transition:0.3s;
-                  "></div>
-                </div>
-                <p style="font-size:12px;margin-top:6px">${percent}%</p>
-              </div>
-            `,
+              html: buildProgressHTML(
+                "🧠 Model Deteksi (CV)",
+                message,
+                percent,
+              ),
             });
           },
         );
+        actions.setModelStatus((prev) => ({
+          ...prev,
+          cv: "ready",
+          cvProgress: 100,
+        }));
 
-        // 🔥 LOAD MODEL AI
+        // ── Muat model AI dengan progress real-time ──────────────────
         await factsServiceRef.current.loadModel((percent, message) => {
           actions.setModelStatus((prev) => ({
             ...prev,
@@ -118,63 +138,60 @@ function App() {
             aiProgress: percent,
             aiMessage: message,
           }));
-
-          // ✅ UPDATE POPUP
+          // Update SweetAlert real-time
           Swal.update({
-            html: `
-            <div style="text-align:left">
-              <p><b>${message}</b></p>
-              <div style="background:#eee;border-radius:6px;overflow:hidden">
-                <div style="
-                  width:${percent}%;
-                  background:#10b981;
-                  height:8px;
-                  transition:0.3s;
-                "></div>
-              </div>
-              <p style="font-size:12px;margin-top:6px">${percent}%</p>
-            </div>
-          `,
+            html: buildProgressHTML(
+              "🤖 Model AI (Fun Facts)",
+              message,
+              percent,
+            ),
           });
         });
-
-        // ✅ TUTUP LOADING
-        Swal.close();
-
-        // ✅ SUCCESS POPUP
-        Swal.fire({
-          icon: "success",
-          title: "Siap Digunakan!",
-          text: "Model AI berhasil dimuat 🚀",
-          timer: 1500,
-          showConfirmButton: false,
-        });
+        actions.setModelStatus((prev) => ({
+          ...prev,
+          ai: "ready",
+          aiProgress: 100,
+        }));
 
         actions.setAppState("ready");
         console.log("[App] Semua model berhasil dimuat!");
+
+        // ── Tutup loading & tampilkan sukses ────────────────────────
+        await Swal.fire({
+          icon: "success",
+          title: "Siap Digunakan! 🚀",
+          text: "Semua model AI berhasil dimuat.",
+          timer: 1800,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        });
       } catch (error) {
         console.error("[App] Error inisialisasi:", error);
+        actions.setError(`Gagal memuat model: ${error.message}`);
+        actions.setAppState("error");
 
-        // ❌ ERROR POPUP
         Swal.fire({
           icon: "error",
           title: "Gagal Memuat Model",
-          text: error.message,
+          html: `
+                        <p>${error.message}</p>
+                        <p style="font-size:12px;color:#6b7280;margin-top:8px">
+                            Coba: Unregister SW → Clear Storage → Hard Refresh (Ctrl+Shift+R)
+                        </p>
+                    `,
+          confirmButtonText: "Muat Ulang",
+          confirmButtonColor: "#10b981",
+        }).then((result) => {
+          if (result.isConfirmed) window.location.reload();
         });
-
-        actions.setError(`Gagal memuat model: ${error.message}`);
-        actions.setAppState("error");
       }
     };
 
     initServices();
+    return () => cleanup();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      cleanup();
-    };
-  }, []); // Jalankan hanya sekali saat mount
-
-  // [Basic] Loop deteksi utama menggunakan requestAnimationFrame
+  // ── [FIX #2] Loop deteksi — stop setelah confident detect ───────────────
   const startDetectionLoop = useCallback(
     (videoElement) => {
       const camera = cameraServiceRef.current;
@@ -186,6 +203,13 @@ function App() {
       const loop = async () => {
         if (!isRunningRef.current) return;
 
+        // Jika sedang generate fakta, PAUSE loop (tidak proses frame baru)
+        // Ini mencegah label tertimpa sebelum fakta selesai dibuat
+        if (isGeneratingRef.current) {
+          animFrameRef.current = requestAnimationFrame(loop);
+          return;
+        }
+
         if (
           camera.shouldProcessFrame() &&
           camera.isReady() &&
@@ -195,42 +219,83 @@ function App() {
             const result = await detection.predict(videoElement);
 
             if (result) {
-              actions.setDetectionResult(result);
-              actions.setAppState("result");
-
               const now = Date.now();
               const isNewLabel = result.label !== lastLabelRef.current;
               const isCooldownDone =
                 now - lastFactTimeRef.current > FACT_COOLDOWN_MS;
               const isConfident = result.confidence >= CONFIDENCE_THRESHOLD;
 
+              // ✅ tampilkan hasil ke UI
+              actions.setDetectionResult(result);
+              actions.setAppState("result");
+
+              // 🔥 FIX UTAMA: STOP kamera saat confident
               if (
                 isConfident &&
                 facts.isReady() &&
                 (isNewLabel || isCooldownDone)
               ) {
-                lastLabelRef.current = result.label;
-                lastFactTimeRef.current = now;
+                // 🚨 STOP LOOP + CAMERA (WAJIB)
+                isRunningRef.current = false;
 
-                actions.setFunFactData({ text: null, isLoading: true });
+                if (animFrameRef.current) {
+                  cancelAnimationFrame(animFrameRef.current);
+                  animFrameRef.current = null;
+                }
+
+                camera.stopCamera();
+                actions.setIsRunning(false);
+
+                // 🔒 LOCK label
+                const labelToGenerate = result.label;
+                lastLabelRef.current = labelToGenerate;
+                lockedLabelRef.current = labelToGenerate;
+                lastFactTimeRef.current = now;
+                isGeneratingRef.current = true;
+
+                // tampilkan loading fakta
+                actions.setFunFactData({
+                  text: null,
+                  isLoading: true,
+                  label: labelToGenerate,
+                });
+
                 try {
-                  const factText = await facts.generateFacts(result.label);
-                  actions.setFunFactData({ text: factText, isLoading: false });
+                  const factText = await facts.generateFacts(labelToGenerate);
+
+                  actions.setFunFactData({
+                    text: factText,
+                    isLoading: false,
+                    label: labelToGenerate,
+                  });
                 } catch (e) {
                   actions.setFunFactData({
                     text: null,
                     isLoading: false,
                     error: e.message,
+                    label: labelToGenerate,
                   });
+                } finally {
+                  isGeneratingRef.current = false;
                 }
+
+                // 🚨 FIX 1: TAMBAHKAN RETURN DI SINI!
+                // Ini memastikan fungsi langsung keluar setelah fakta selesai digenerate
+                // dan TIDAK membaca kode requestAnimationFrame di bagian bawah.
+                return;
               }
             }
           } catch (err) {
-            console.error("[App] Error dalam loop deteksi:", err);
+            console.error("[App] Error loop deteksi:", err);
           }
         }
 
-        animFrameRef.current = requestAnimationFrame(loop);
+        // 🚨 FIX 2: BUNGKUS requestAnimationFrame DENGAN GUARD (PALING AMAN)
+        // Jadi kalau di tengah proses isRunningRef.current berubah jadi false,
+        // frame berikutnya tidak akan pernah dijadwalkan.
+        if (isRunningRef.current) {
+          animFrameRef.current = requestAnimationFrame(loop);
+        }
       };
 
       animFrameRef.current = requestAnimationFrame(loop);
@@ -246,31 +311,31 @@ function App() {
     [actions],
   );
 
-  // [Basic] Toggle kamera
+  // ── [Basic] Toggle kamera ─────────────────────────────────────────────────
   const handleToggleCamera = useCallback(
     async (videoElement) => {
       const camera = cameraServiceRef.current;
 
       if (state.isRunning) {
         isRunningRef.current = false;
-        if (detectionCleanupRef.current) {
-          detectionCleanupRef.current();
-        }
+        isGeneratingRef.current = false;
+        if (detectionCleanupRef.current) detectionCleanupRef.current();
         camera.stopCamera();
         actions.setIsRunning(false);
         actions.setAppState("idle");
         actions.setDetectionResult(null);
         actions.setFunFactData(null);
         lastLabelRef.current = "";
+        lockedLabelRef.current = "";
       } else {
         try {
           actions.setAppState("analyzing");
           await camera.loadCameras();
           await camera.startCamera();
           isRunningRef.current = true;
+          isGeneratingRef.current = false;
           actions.setIsRunning(true);
           actions.setError(null);
-
           startDetectionLoop(videoElement || camera.video);
         } catch (error) {
           console.error("[App] Gagal memulai kamera:", error);
@@ -283,7 +348,7 @@ function App() {
     [state.isRunning, actions, startDetectionLoop],
   );
 
-  // [Advanced] Ubah tone/persona AI
+  // ── [Advanced] Ubah tone ──────────────────────────────────────────────────
   const handleToneChange = useCallback(
     (newTone) => {
       setCurrentTone(newTone);
@@ -294,49 +359,41 @@ function App() {
     [actions],
   );
 
-  // [Skilled] Salin fakta ke clipboard
+  // ── [Skilled] Copy to clipboard dengan SweetAlert toast ──────────────────
   const handleCopyFact = useCallback(async () => {
     const text = state.funFactData?.text;
     if (!text) return;
 
     try {
       await navigator.clipboard.writeText(text);
+      actions.setCopyStatus("copied");
+      setTimeout(() => actions.setCopyStatus("idle"), 2000);
 
-      // 🔥 Toast sukses (UX modern, non-blocking)
       Swal.fire({
         toast: true,
         position: "top-end",
         icon: "success",
-        title: "Fakta berhasil disalin",
+        title: "✅ Fakta berhasil disalin!",
         showConfirmButton: false,
         timer: 1500,
+        timerProgressBar: true,
       });
-
-      // Tetap pakai state lama (UNTUK UI BUTTON)
-      actions.setCopyStatus("copied");
-
-      // Reset ke idle setelah 2 detik
-      setTimeout(() => actions.setCopyStatus("idle"), 2000);
     } catch (error) {
       console.error("[App] Gagal menyalin:", error);
+      actions.setCopyStatus("error");
+      setTimeout(() => actions.setCopyStatus("idle"), 2000);
 
-      // 🔥 Toast error
       Swal.fire({
         toast: true,
         position: "top-end",
         icon: "error",
-        title: "Gagal menyalin",
+        title: "❌ Gagal menyalin",
         showConfirmButton: false,
         timer: 1500,
       });
-
-      actions.setCopyStatus("error");
-
-      setTimeout(() => actions.setCopyStatus("idle"), 2000);
     }
   }, [state.funFactData, actions]);
 
-  // Buat string status yang mudah dibaca untuk Header dan CameraSection
   const getModelStatusString = () => {
     const { cv, ai, cvProgress, aiProgress, cvMessage, aiMessage } =
       state.modelStatus;
@@ -356,8 +413,18 @@ function App() {
       <Header modelStatus={modelStatusString} />
 
       {!isOnline && (
-        <div className="offline-banner">
-          ⚠️ Anda sedang offline / koneksi terputus
+        <div
+          style={{
+            background: "#fef3c7",
+            color: "#92400e",
+            textAlign: "center",
+            padding: "0.5rem 1rem",
+            fontSize: "0.8125rem",
+            borderBottom: "1px solid #fcd34d",
+            fontWeight: 500,
+          }}
+        >
+          ⚠️ Offline — Fitur deteksi tetap berjalan jika model sudah di-cache
         </div>
       )}
 
@@ -403,7 +470,7 @@ function App() {
             fontSize: "0.875rem",
             boxShadow: "var(--shadow-lg)",
             display: "flex",
-            flexDirection: "column", // Ubah ke kolom agar tombol rapi
+            flexDirection: "column",
             alignItems: "center",
             gap: "0.75rem",
             zIndex: 1000,
@@ -411,7 +478,7 @@ function App() {
           }}
         >
           <div>
-            <strong>Error Fatal:</strong> {state.error}
+            <strong>Error:</strong> {state.error}
           </div>
           <div style={{ display: "flex", gap: "10px" }}>
             <button
@@ -426,7 +493,7 @@ function App() {
                 fontWeight: "bold",
               }}
             >
-              Muat Ulang Aplikasi
+              Muat Ulang
             </button>
             <button
               onClick={() => actions.setError(null)}
@@ -439,7 +506,7 @@ function App() {
                 cursor: "pointer",
               }}
             >
-              Tutup Pesan
+              Tutup
             </button>
           </div>
         </div>

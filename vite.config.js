@@ -7,21 +7,10 @@ export default defineConfig({
     react(),
 
     VitePWA({
-      /**
-       * Gunakan 'generateSW' agar Workbox otomatis generate sw.js
-       * tanpa perlu kita tulis manual (lebih stabil, tidak ada bug inject).
-       *
-       * Kalau tetap mau pakai 'injectManifest', pastikan:
-       * - File ada di src/sw.js
-       * - Tidak ada syntax error di sw.js
-       * - Tidak ada import yang gagal
-       */
       strategies: "generateSW",
-
       registerType: "autoUpdate",
       injectRegister: "auto",
 
-      // [Skilled] Web App Manifest lengkap agar PWA bisa diinstal
       manifest: {
         name: "RootFacts - AI Plant Recognition",
         short_name: "RootFacts",
@@ -55,25 +44,26 @@ export default defineConfig({
         ],
       },
 
-      // [Advanced] Workbox config
       workbox: {
-        // Precache semua aset build + model TF lokal
         globPatterns: [
-          "**/*.{js,css,html,ico,png,svg,woff,woff2}",
-          "model/*.{json,bin}", // [Advanced] Model TensorFlow.js offline
+          // Aset build standar
+          "**/*.{js,css,html,ico,png,svg}",
+          // [FIX OFFLINE] File WASM self-hosted (transformers.js)
+          "wasm/*.{wasm,mjs}",
+          // [Advanced] Model TF.js lokal
+          "model/*.{json,bin}",
+          // Font lokal (jika ada)
+          "fonts/*.{woff,woff2,ttf}",
         ],
 
-        // Naikkan batas (model bisa besar)
+        // Naikkan limit — file WASM dan model bisa besar
         maximumFileSizeToCacheInBytes: 500 * 1024 * 1024,
 
-        // SPA fallback
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
 
-        // Runtime caching untuk resource eksternal
         runtimeCaching: [
-          // [Advanced] Cache model HuggingFace (Transformers.js)
-          // NetworkFirst: coba internet dulu, fallback ke cache
+          // [Advanced] Model HuggingFace — NetworkFirst
           {
             urlPattern: /^https:\/\/(huggingface\.co|.*\.hf\.co)\/.*/i,
             handler: "NetworkFirst",
@@ -87,21 +77,18 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          // Cache file ONNX
+          // [Advanced] File ONNX dari CDN
           {
             urlPattern: /\.(onnx|onnx_data)$/i,
             handler: "NetworkFirst",
             options: {
               cacheName: "onnx-cache-v1",
               networkTimeoutSeconds: 60,
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
-              },
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 365 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          // Cache Google Fonts
+          // Google Fonts (opsional — sudah ada font lokal di index.css)
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
             handler: "StaleWhileRevalidate",
@@ -114,10 +101,7 @@ export default defineConfig({
         ],
       },
 
-      // SW hanya aktif di production build
-      devOptions: {
-        enabled: false,
-      },
+      devOptions: { enabled: false },
     }),
   ],
 
@@ -140,7 +124,6 @@ export default defineConfig({
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
-
   preview: {
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
